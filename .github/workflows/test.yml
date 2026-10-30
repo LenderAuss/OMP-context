@@ -1,0 +1,38 @@
+name: Portable installer and memory
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+      - name: Python unit tests
+        run: python -m unittest discover -s tests -p "test_*.py"
+      - name: JavaScript unit tests
+        run: node --test tests/checkpoint.test.mjs
+      - name: Public source bundle check
+        run: python scripts/package.py --check
+      - name: Install on POSIX
+        if: runner.os != 'Windows'
+        shell: bash
+        run: sh install.sh --prefix "$RUNNER_TEMP/omp-kit" --bin-dir "$RUNNER_TEMP/kit-bin" --no-path
+      - name: Install on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./install.ps1 -Prefix "$env:RUNNER_TEMP/omp-kit" -BinDir "$env:RUNNER_TEMP/kit-bin" -NoPath
+      - name: Native OMP cross-session integration (loopback only)
+        env:
+          KIT_TEST_PREFIX: ${{ runner.temp }}/omp-kit
+        run: python tests/integration_rpc.py --prefix "${{ runner.temp }}/omp-kit"

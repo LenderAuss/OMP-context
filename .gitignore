@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+.venv/
+node_modules/
+dist/
+.test-output/
+*.sqlite*
+*.db*
+*.jsonl
+.env
+.env.*
+state/
+sessions/
+graphify-out/
+*.pem
+*.key
+*.local.json

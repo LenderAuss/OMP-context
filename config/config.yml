@@ -1,0 +1,28 @@
+# Portable context preset. Select your own provider/model with /login and /model.
+tools:
+  approvalMode: yolo
+  approval:
+    task: deny
+computer:
+  enabled: false
+collab:
+  autoStart: "off"
+compaction:
+  enabled: true
+  experimentalContextManagement: true
+  methodOrder: [shake, soft]
+  asyncEnabled: false
+  midTurnEnabled: true
+  thresholdTokens: 120000
+  thresholdPercent: -1
+  keepRecentTokens: 20000
+  autoContinue: false
+  idleEnabled: false
+  supersedeReads: false
+  dropUseless: false
+providers:
+  cacheWarming: "off"
+memory:
+  backend: "off"
+advisor:
+  enabled: false
