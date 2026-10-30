@@ -63,14 +63,14 @@ class RPC:
         self.events=[];self.queue=asyncio.Queue();self.serial=0
     async def start(self):
         config=self.work/'test.yml'
-        config.write_text((ROOT/'config/config.yml').read_text()+"\nsession:\n  maxCost: 0.5\n")
+        config.write_text((ROOT/'config/config.yml').read_text(encoding='utf-8')+"\nsession:\n  maxCost: 0.5\n",encoding='utf-8')
         env={**os.environ,'OMP_KIT_MEMORY_DB':str(self.work/'memory.sqlite3'),'OMP_KIT_PYTHON':self.manifest['python'],'OMP_KIT_GRAPHIFY':self.manifest['graphify']}
         args=[self.manifest['omp'],'--cwd',str(self.work),'--mode','rpc','--no-ui','--no-lsp','--no-skills','--no-rules','--no-title','--no-pty','--no-extensions','--extension',str(Path(self.manifest['app'])/'runtime/extension.js'),'--config',str(config),'--tools','read,grep,context_notes,new_context,context_probe,project_graph,shared_memory','--model',self.model,'--thinking','low','--session-dir',str(self.work/f'sessions-{self.index}')]
         if self.fixture_url:
             env['PI_CODING_AGENT_DIR']=str(self.work/'empty-agent')
             env['OMP_KIT_FIXTURE_URL']=self.fixture_url
             args+=['--extension',str(ROOT/'tests/fixture-provider.js')]
-        self.err=open(self.work/f'stderr-{self.index}.log','w')
+        self.err=open(self.work/f'stderr-{self.index}.log','w',encoding='utf-8')
         self.proc=await asyncio.create_subprocess_exec(*args,stdin=asyncio.subprocess.PIPE,stdout=asyncio.subprocess.PIPE,stderr=self.err,env=env,limit=4*1024*1024)
         async def read():
             async for line in self.proc.stdout:
@@ -110,13 +110,13 @@ class RPC:
                 try:await asyncio.wait_for(self.proc.wait(),15)
                 except asyncio.TimeoutError:self.proc.terminate();await self.proc.wait()
             await self.reader;self.err.close()
-            (self.work/f'rpc-{self.index}.json').write_text(json.dumps(self.events,ensure_ascii=False))
+            (self.work/f'rpc-{self.index}.json').write_text(json.dumps(self.events,ensure_ascii=False),encoding='utf-8')
 
 
 async def run(prefix,live):
     os.umask(0o077)
     work=Path(tempfile.mkdtemp(prefix='omp-kit-integration-')).resolve()
-    manifest=json.loads((prefix/'installation.json').read_text())
+    manifest=json.loads((prefix/'installation.json').read_text(encoding='utf-8'))
     for file in (ROOT/'runtime').rglob('*'):
         if file.is_file() and '__pycache__' not in file.parts and not file.name.endswith('.local.json'):
             assert file.read_bytes()==(Path(manifest['app'])/file.relative_to(ROOT)).read_bytes(),'Reinstall current runtime before integration testing'
@@ -151,7 +151,7 @@ async def run(prefix,live):
     finally:
         await one.close();await two.close()
         if server:server.shutdown();server.server_close()
-        (work/'report.json').write_text(json.dumps(report,indent=2,ensure_ascii=False))
+        (work/'report.json').write_text(json.dumps(report,indent=2,ensure_ascii=False),encoding='utf-8')
         print(json.dumps(report,indent=2,ensure_ascii=False),flush=True)
 
 

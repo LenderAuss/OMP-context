@@ -99,7 +99,7 @@ class InstallerTest(unittest.TestCase):
             self.assertEqual(len(lock['omp']['assets'][name]['sha256']),64)
 
     def test_runtime_copy_does_not_include_local_config_or_bytecode(self):
-        names=[str(x.relative_to(ROOT)) for x in installer.source_files()]
+        names=[x.relative_to(ROOT).as_posix() for x in installer.source_files()]
         self.assertFalse(any('__pycache__' in x or '.local.json' in x for x in names))
         self.assertTrue('runtime/python/memory.py' in names)
 
