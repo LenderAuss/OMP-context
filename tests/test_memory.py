@@ -92,6 +92,19 @@ class MemoryTest(unittest.TestCase):
         self.assertTrue(self.db.search({"project":str(self.root/"other"),"query":"Russian"})["items"])
         with self.assertRaises(ValueError):self.remember(scope="user",sources={"u1":{"text":"inferred preference","role":"assistant"}})
 
+    def test_project_candidates_are_scoped_before_result_cap(self):
+        local=self.remember('migration production '+('context details '*90),key='migration.target')
+        for i in range(105):
+            self.remember(f'migration production option {i}',key=f'other.{i}',session=f'other{i}',project=str(self.root/'other'))
+        for scope in ('project','all'):
+            found=self.search('migration production',scope=scope)
+            self.assertEqual(found[0]['id'],local['id'])
+        self.assertEqual(self.search('',scope='project')[0]['id'],local['id'])
+
+    def test_user_search_scope_does_not_fall_back_to_other_projects(self):
+        self.db.capture(self.req)
+        self.assertFalse(self.search('production deployment',scope='user'))
+
     def test_secrets_rejected_and_source_excerpt_redacted(self):
         with self.assertRaises(ValueError):self.remember("Bearer "+"x"*40)
         fact=self.remember(sources={"u1":{"role":"user","text":"A note with Bearer "+"x"*40}})
@@ -121,6 +134,31 @@ class MemoryTest(unittest.TestCase):
         fact=self.remember();self.db.forget(fact["id"])
         self.assertFalse(self.search("staging"));self.assertFalse(self.db.evidence(fact["id"])["found"])
         self.assertIsNone(self.remember(session="s9")["id"])
+
+    def test_forget_removes_all_same_project_duplicates_only(self):
+        first=self.remember('Use staging',session='a')
+        duplicate=self.remember('  USE   staging  ',session='b')
+        other=self.remember('Use staging',session='c',project=str(self.root/'other'))
+        opposite=self.remember('Do not use staging',session='d',key='other.setting')
+        result=self.db.forget(first['id'])
+        self.assertEqual(result['removed_records'],2)
+        self.assertFalse(self.db.evidence(duplicate['id'])['found'])
+        self.assertTrue(self.db.evidence(other['id'])['found'])
+        self.assertTrue(self.db.evidence(opposite['id'])['found'])
+        self.assertEqual(self.db.forget(first['id'])['removed_records'],0)
+        self.assertEqual([x['id'] for x in self.search('staging')],[opposite['id']])
+
+    def test_legacy_tombstone_hides_existing_duplicate_from_all_surfaces(self):
+        first=self.remember(session='a');duplicate=self.remember(session='b')
+        # Reproduce v0.1.0's single-row deletion without rewriting the database schema.
+        with self.db.db:
+            self.db.db.execute('INSERT INTO tombstones VALUES(?,?,?)',(m.project_identity(self.project)[0],m.digest(m.claim_key('Use staging')),0))
+            self.db.db.execute("UPDATE facts SET status='forgotten',text='',sources='[]' WHERE id=?",(first['id'],))
+        self.db.close();self.db=m.Memory(self.file)
+        self.assertFalse(self.search('staging'))
+        self.assertFalse(self.db.evidence(duplicate['id'])['found'])
+        graph=json.loads(Path(self.db.graph()['graph']).read_text(encoding='utf-8'))
+        self.assertFalse(any(n['id']=='memory:'+duplicate['id'] for n in graph['nodes']))
 
     def test_fts_query_injection_and_output_bounds(self):
         self.db.capture(self.req)

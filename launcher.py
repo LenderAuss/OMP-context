@@ -24,11 +24,15 @@ def main():
         checks["config"] = {"ok": (Path(manifest["agentDir"]) / "config.yml").is_file()}
         print(json.dumps({"checks": checks, "state": str(prefix / "state"), "credentials_checked": False}, indent=2))
         return int(not all(check["ok"] for check in checks.values()))
-    if args and args[0] == "memory":
-        action = args[1] if len(args) > 1 else "status"
-        if action not in ("status", "search", "evidence", "forget", "graph"):
+    if args and args[0] in ("memory", "health"):
+        action = "health" if args[0] == "health" else args[1] if len(args) > 1 else "status"
+        if action not in ("status", "search", "evidence", "forget", "graph", "health"):
             raise SystemExit("Usage: omp-kit memory status|search <query>|evidence <id>|forget <id>|graph")
         request = {"action": action, "project": os.getcwd()}
+        if action == "health":
+            if args[0] != "health" or len(args) > 2:
+                raise SystemExit("Usage: omp-kit health [session.jsonl]")
+            request.update(agent_dir=manifest["agentDir"], file=args[1] if len(args) == 2 else None)
         if action == "search":
             request["query"] = " ".join(args[2:])
             request["scope"] = "all"

@@ -21,7 +21,7 @@ jobs:
       - name: Python unit tests
         run: python -m unittest discover -s tests -p "test_*.py"
       - name: JavaScript unit tests
-        run: node --test tests/checkpoint.test.mjs
+        run: node --test tests/checkpoint.test.mjs tests/notebook.test.mjs
       - name: Public source bundle check
         run: python scripts/package.py --check
       - name: Install on POSIX

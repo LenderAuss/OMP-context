@@ -4,6 +4,7 @@ import argparse
 import gzip
 import hashlib
 import io
+import json
 from pathlib import Path
 import re
 import tarfile
@@ -39,7 +40,8 @@ def main():
     paths=files();check(paths)
     if args.check:print(f'Public source allowlist and sensitive-path scan passed: {len(paths)} files');return
     out=ROOT/'dist';out.mkdir(exist_ok=True)
-    stem='omp-context-kit-0.1.0';zip_path=out/(stem+'.zip');tar_path=out/(stem+'.tar.gz')
+    version=json.loads((ROOT/'package.json').read_text(encoding='utf-8'))['version']
+    stem='omp-context-kit-'+version;zip_path=out/(stem+'.zip');tar_path=out/(stem+'.tar.gz')
     with zipfile.ZipFile(zip_path,'w',compression=zipfile.ZIP_DEFLATED,compresslevel=9) as archive:
         for p in paths:
             info=zipfile.ZipInfo(stem+'/'+p.relative_to(ROOT).as_posix(),date_time=(1980,1,1,0,0,0))

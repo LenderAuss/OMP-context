@@ -18,6 +18,7 @@ import time
 import urllib.request
 
 SOURCE = Path(__file__).resolve().parent
+VERSION = json.loads((SOURCE / "package.json").read_text(encoding="utf-8"))["version"]
 MARKER = "omp-context-kit managed launcher"
 
 
@@ -146,7 +147,7 @@ def source_files():
 def install_app(prefix):
     files = source_files()
     identity = hashlib.sha256("\n".join(str(p.relative_to(SOURCE)) + ":" + sha(p) for p in files).encode()).hexdigest()[:16]
-    app = prefix / "releases" / ("0.1.0-" + identity)
+    app = prefix / "releases" / (VERSION + "-" + identity)
     if not app.exists():
         app.parent.mkdir(parents=True, exist_ok=True)
         temporary = Path(tempfile.mkdtemp(prefix=".app-", dir=app.parent))
@@ -273,7 +274,7 @@ def install(args):
                     raise ValueError(f"Launcher {file.name} already exists or was edited; choose --bin-dir")
             content = launcher_text(python, app, prefix, windows=os.name=="nt", graph=graph)
             launchers[str(file)] = content
-        manifest = {"version":"0.1.0","installed":time.time(),"platform":target,"app":str(app),"python":str(python),"omp":str(omp),"graphify":str(graphify),"agentDir":str(agent),"memoryDb":str(memory_db),"launchers":{}}
+        manifest = {"version":VERSION,"installed":time.time(),"platform":target,"app":str(app),"python":str(python),"omp":str(omp),"graphify":str(graphify),"agentDir":str(agent),"memoryDb":str(memory_db),"launchers":{}}
         if previous:
             atomic_text(prefix / "backups" / f"installation-{time.time_ns()}.json", json.dumps(previous, indent=2))
         # All downloads and runtime checks have passed before changing launchers.

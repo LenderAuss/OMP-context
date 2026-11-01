@@ -38,13 +38,15 @@ class Fixture(BaseHTTPRequestHandler):
             raw=last_tool.get('content','')
             if isinstance(raw,list):raw=''.join(b.get('text','') for b in raw)
             sources=json.loads(raw)
-            entry=next(x['id'] for x in sources['sources'] if x['role']=='user')
-            state={'version':1,'goal':{'text':'Bluebird PostgreSQL 5433 staging preparation','sources':[entry]},
+            entry=next(x['ref'] for x in sources['sources'] if x['role']=='user')
+            state={'goal':{'text':'Bluebird PostgreSQL 5433 staging preparation','sources':[entry]},
                    'constraints':[{'text':'Production deployment is forbidden','sources':[entry]}],
-                   'decisions':[{'id':'db','text':'PostgreSQL on port 5433','status':'active','sources':[entry]}],
+                   'decisions':[{'text':'PostgreSQL on port 5433','sources':[entry]}],
                    'progress':[{'text':'Migration is unfinished','status':'pending','sources':[entry]}],
                    'next':['Test migration'],'questions':[]}
-            delta=self.call('save','context_notes',{'text':json.dumps(state)});finish='tool_calls'
+            delta=self.call('save','context_notes',{'catalogue':sources['catalogue'],'state':state});finish='tool_calls'
+        elif last_tool.get('tool_call_id')=='save':
+            delta=self.call('rollover','new_context',{});finish='tool_calls'
         else:
             delta={'role':'assistant','content':'SAVED'};finish='stop'
         self.send_response(200);self.send_header('Content-Type','text/event-stream');self.send_header('Connection','close');self.end_headers()
@@ -63,7 +65,7 @@ class RPC:
         self.events=[];self.queue=asyncio.Queue();self.serial=0
     async def start(self):
         config=self.work/'test.yml'
-        config.write_text((ROOT/'config/config.yml').read_text(encoding='utf-8')+"\nsession:\n  maxCost: 0.5\n",encoding='utf-8')
+        config.write_text((ROOT/'config/config.yml').read_text(encoding='utf-8').replace('keepRecentTokens: 20000','keepRecentTokens: 512')+"\nsession:\n  maxCost: 0.5\n",encoding='utf-8')
         env={**os.environ,'OMP_KIT_MEMORY_DB':str(self.work/'memory.sqlite3'),'OMP_KIT_PYTHON':self.manifest['python'],'OMP_KIT_GRAPHIFY':self.manifest['graphify']}
         args=[self.manifest['omp'],'--cwd',str(self.work),'--mode','rpc','--no-ui','--no-lsp','--no-skills','--no-rules','--no-title','--no-pty','--no-extensions','--extension',str(Path(self.manifest['app'])/'runtime/extension.js'),'--config',str(config),'--tools','read,grep,context_notes,new_context,context_probe,project_graph,shared_memory','--model',self.model,'--thinking','low','--session-dir',str(self.work/f'sessions-{self.index}')]
         if self.fixture_url:
@@ -96,10 +98,11 @@ class RPC:
         self.proc.stdin.write((json.dumps({'type':command,'id':rid,**values})+'\n').encode());await self.proc.stdin.drain()
         r=await self.wait(lambda e:e.get('type')=='response' and e.get('id')==rid)
         assert r.get('success'),str(r)[:400]
-        if command=='prompt' and r.get('data',{}).get('agentInvoked') is not False:
+        if command=='prompt' and (r.get('data') or {}).get('agentInvoked') is not False:
             result=await self.wait(lambda e:e.get('type')=='prompt_result' and e.get('id')==rid,240)
             assert result.get('status')=='completed',str(result)[:500]
             if not result.get('sessionSettled'):await self.wait(lambda e:e.get('type')=='session_settled')
+            return result
         return r.get('data')
     async def entries(self):
         data=await self.request('get_entries');return data['entries'] if isinstance(data,dict) else data
@@ -133,6 +136,18 @@ async def run(prefix,live):
         await one.request('prompt',message='FIXTURE_SAVE. Synthetic memory test. Bluebird uses PostgreSQL on port 5433. Production deployment is forbidden. Migration is unfinished. Get exact source IDs using context_probe, save these facts in a valid context_notes checkpoint, then answer SAVED. Do not perform project work.')
         first=await one.entries()
         assert any(e.get('customType')=='experimental_context_notes' for e in first),'no checkpoint'
+        saved=next(e for e in reversed(first) if e.get('customType')=='experimental_context_notes')
+        saved_state=json.loads(saved['data']['text'])
+        assert saved_state['version']==1 and saved_state['decisions'][0]['id']
+        assert saved_state['goal']['sources'][0] in {e.get('id') for e in first},'source alias was not expanded to an actual entry'
+        if not live:
+            assert any(e.get('type')=='compaction' and e.get('details',{}).get('kind')=='experimental-context-rollover' for e in first),'native rollover missing after structured note'
+        commands=await one.request('get_available_commands')
+        assert 'context-health' in json.dumps(commands),'health command not registered'
+        request_count=len(Fixture.requests)
+        command_result=await one.request('prompt',message='/context-health')
+        assert command_result.get('agentInvoked') is False,'health command invoked a model'
+        assert len(Fixture.requests)==request_count,'health command made a provider request'
         await one.close()
         await two.start()
         empty=await two.entries()
@@ -147,7 +162,7 @@ async def run(prefix,live):
         if isinstance(answer.get('database'),str):answer['database']=answer['database'].casefold()
         assert answer=={'database':'postgresql','port':5433,'production_allowed':False,'migration_done':False},answer
         report.update(success=True,answer=answer,recallCards=len(recalled),fixtureRequests=len(Fixture.requests) if not live else None,
-                      checks=['real OMP extension loads','checkpoint auto-exported','new independent conversation','automatic sourced memory injection','facts and pending work recalled'])
+                      checks=['real OMP extension loads','structured notes delegated to native OMP','source references valid','checkpoint auto-exported','native rollover tested with loopback fixture' if not live else 'live model notes saved','health command makes no model call','new independent conversation','automatic sourced memory injection','facts and pending work recalled'])
     finally:
         await one.close();await two.close()
         if server:server.shutdown();server.server_close()
