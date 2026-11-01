@@ -42,11 +42,9 @@ class Fixture(BaseHTTPRequestHandler):
             state={'goal':{'text':'Bluebird PostgreSQL 5433 staging preparation','sources':[entry]},
                    'constraints':[{'text':'Production deployment is forbidden','sources':[entry]}],
                    'decisions':[{'text':'PostgreSQL on port 5433','sources':[entry]}],
-                   'progress':[{'text':'Migration is unfinished','status':'pending','sources':[entry]}],
+                   'progress':[{'text':'Migration is unfinished','status':'in_progress','sources':[entry]}],
                    'next':['Test migration'],'questions':[]}
             delta=self.call('save','context_notes',{'catalogue':sources['catalogue'],'state':state});finish='tool_calls'
-        elif last_tool.get('tool_call_id')=='save':
-            delta=self.call('rollover','new_context',{});finish='tool_calls'
         else:
             delta={'role':'assistant','content':'SAVED'};finish='stop'
         self.send_response(200);self.send_header('Content-Type','text/event-stream');self.send_header('Connection','close');self.end_headers()
@@ -60,14 +58,16 @@ class Fixture(BaseHTTPRequestHandler):
 
 
 class RPC:
-    def __init__(self,manifest,work,model,fixture_url=None,index=1):
+    def __init__(self,manifest,work,model,fixture_url=None,index=1,resume=None):
         self.manifest,self.work,self.model,self.fixture_url,self.index=manifest,work,model,fixture_url,index
+        self.resume=resume
         self.events=[];self.queue=asyncio.Queue();self.serial=0
     async def start(self):
         config=self.work/'test.yml'
         config.write_text((ROOT/'config/config.yml').read_text(encoding='utf-8').replace('keepRecentTokens: 20000','keepRecentTokens: 512')+"\nsession:\n  maxCost: 0.5\n",encoding='utf-8')
         env={**os.environ,'OMP_KIT_MEMORY_DB':str(self.work/'memory.sqlite3'),'OMP_KIT_PYTHON':self.manifest['python'],'OMP_KIT_GRAPHIFY':self.manifest['graphify']}
         args=[self.manifest['omp'],'--cwd',str(self.work),'--mode','rpc','--no-ui','--no-lsp','--no-skills','--no-rules','--no-title','--no-pty','--no-extensions','--extension',str(Path(self.manifest['app'])/'runtime/extension.js'),'--config',str(config),'--tools','read,grep,context_notes,new_context,context_probe,project_graph,shared_memory','--model',self.model,'--thinking','low','--session-dir',str(self.work/f'sessions-{self.index}')]
+        if self.resume:args+=['--resume',str(self.resume)]
         if self.fixture_url:
             env['PI_CODING_AGENT_DIR']=str(self.work/'empty-agent')
             env['OMP_KIT_FIXTURE_URL']=self.fixture_url
@@ -85,6 +85,7 @@ class RPC:
         state=await self.request('get_state')
         names={t['name'] for t in state['dumpTools']}
         assert {'context_notes','shared_memory','project_graph'}.issubset(names),names
+        assert 'new_context' not in names,'notebook-only rollover must not bypass native summaries'
         assert not {'bash','write','task','edit'}.intersection(names),names
     async def wait(self,predicate,timeout=90):
         async def loop():
@@ -139,9 +140,8 @@ async def run(prefix,live):
         saved=next(e for e in reversed(first) if e.get('customType')=='experimental_context_notes')
         saved_state=json.loads(saved['data']['text'])
         assert saved_state['version']==1 and saved_state['decisions'][0]['id']
+        assert saved_state['progress'][0]['status']=='pending','unfinished work must remain unfinished in stored v1 notes'
         assert saved_state['goal']['sources'][0] in {e.get('id') for e in first},'source alias was not expanded to an actual entry'
-        if not live:
-            assert any(e.get('type')=='compaction' and e.get('details',{}).get('kind')=='experimental-context-rollover' for e in first),'native rollover missing after structured note'
         commands=await one.request('get_available_commands')
         assert 'context-health' in json.dumps(commands),'health command not registered'
         request_count=len(Fixture.requests)
@@ -162,7 +162,7 @@ async def run(prefix,live):
         if isinstance(answer.get('database'),str):answer['database']=answer['database'].casefold()
         assert answer=={'database':'postgresql','port':5433,'production_allowed':False,'migration_done':False},answer
         report.update(success=True,answer=answer,recallCards=len(recalled),fixtureRequests=len(Fixture.requests) if not live else None,
-                      checks=['real OMP extension loads','structured notes delegated to native OMP','source references valid','checkpoint auto-exported','native rollover tested with loopback fixture' if not live else 'live model notes saved','health command makes no model call','new independent conversation','automatic sourced memory injection','facts and pending work recalled'])
+                      checks=['real OMP extension loads','structured notes delegated to native OMP','source references valid','checkpoint auto-exported','unsafe notebook-only rollover disabled','health command makes no model call','new independent conversation','automatic sourced memory injection','facts and pending work recalled'])
     finally:
         await one.close();await two.close()
         if server:server.shutdown();server.server_close()

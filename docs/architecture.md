@@ -2,7 +2,13 @@
 
 ## Storage and request flow
 
-`omp-kit` → private OMP profile → native notes-backed context windows.
+`omp-kit` → private OMP profile → native summary compaction + separate sourced cross-session memory.
+
+Version 0.1.2 removes the checkpoint veto and its stop-hook repair continuation. In 0.1.1 two rejected notebook writes could leave every rollover cancelled indefinitely while the conversation kept growing. Checkpoint validity must not be a prerequisite for preserving a long session through a native summary.
+
+The pinned OMP 18.14.0 selects notebook-only rollover only if `context_notes`, `new_context`, `read` and `grep` are all active. Using the supported `setActiveTools` API, the extension excludes only `new_context` at session startup, branch/tree changes and before prompts. Native notes and full branch history remain available. OMP's regular maintenance pipeline then handles threshold, mid-turn, overflow and manual compaction with its configured methods; the preset uses `shake` then `soft`. A late tool-surface change is corrected before compaction, cancelling only that unsafe rollover pass. Ordinary native summaries are never gated on notes. This capability contract is version-specific and must be integration-tested before updating OMP.
+
+No extension writes compaction entries or starts a second compactor. The `session.compacting` hook supplies brief preservation guidance without replacing the native summary prompt. Native OMP owns summary requests, the cut point, retention of complete recent tool units, journal commits, continuation and provider-failure handling. `autoContinue` is on for new profiles; existing user configuration remains preserved. Idle compaction and cache warming stay off. A native summarizer may make multiple requests at a boundary (for example summary chunks and a short summary); these consume the selected provider's quota.
 
 The runtime extension validates native `context_notes` before execution. A successful note is exported to a separate local SQLite database by a bounded Python child process over stdin; private payloads are never placed in command-line arguments. Each claim retains source entry IDs, a short redacted excerpt, the original session path and a source-text hash. This proves an association with an entry, not the truth of the summary.
 
@@ -10,7 +16,7 @@ In 0.1.1 a session-scoped source catalogue gives short aliases bound to a catalo
 
 Before a user prompt, local FTS5 retrieves a bounded set of records. The callback returns an evidence card with project, date, status and sources. It deduplicates against accepted journal entries, not mutable hook invocation state, so a host policy retry cannot silently discard the recall. Compaction starts a new window in which recall can be injected again.
 
-No extra LLM performs search, embeddings, graph projection or periodic background summaries. Writing the actual checkpoint is model work in the current conversation. A missing/stale checkpoint can cause one repair continuation rather than silently dropping uncaptured work.
+No extra LLM performs search, embeddings, graph projection or periodic background summaries. Writing the actual checkpoint is model work in the current conversation. Rejected notes cannot block native summary compaction or create extension-owned repair loops. Structured `in_progress` is normalized to `pending`, preserving unfinished status and the v1 storage schema; catalogue IDs mistakenly used as source IDs are rejected with a targeted explanation.
 
 ## Isolation and corrections
 
@@ -29,7 +35,7 @@ No extra LLM performs search, embeddings, graph projection or periodic backgroun
 
 ## Local health metrics
 
-`/context-health` and `context_probe(action=health)` filter the saved journal to current-branch IDs. `omp-kit health` scans the latest journal (or an explicitly named JSONL file) and labels its potentially multi-branch scope. Reading is bounded to 32 MiB, incomplete lines are counted, and a truncated report is marked partial. Only token/cache aggregates, checkpoint counters, memory-card byte counts and rollover metadata are returned. No extra model runs, hidden summarizers, database telemetry tables or dialogue exports are created. Byte counts are not token or billing estimates.
+`/context-health` and `context_probe(action=health)` filter the saved journal to current-branch IDs. `omp-kit health` scans the latest journal (or an explicitly named JSONL file) and labels its potentially multi-branch scope. Reading is bounded to 32 MiB, incomplete lines are counted, and a truncated report is marked partial. Only token/cache aggregates, checkpoint counters, memory-card byte counts and compaction metadata are returned. `compactions` counts all committed boundaries; `rollovers` retains its older notebook-only meaning. Journaled assistant usage can exclude native summarizer/side requests and is not total billing. Health queries create no model runs, database telemetry tables or dialogue exports. Byte counts are not token estimates.
 
 ## Common graph
 
@@ -49,6 +55,6 @@ The default approval preset is intentionally `yolo`, matching the requested conf
 
 Unit tests cover checksum rejection, platform selection, shell quoting, PATH idempotence, input limits, source IDs, branch/reset boundaries, supersession, provenance, secret redaction, forgotten-memory tombstones, negation-preserving identity, concurrency and database transaction rollback.
 
-The loopback integration test uses the real OMP process, extension lifecycle, actual tools and two independent sessions. It tests transport and automatic persistence/recall without relying on a paid model's behavior. The optional live test separately measures whether a selected model follows the checkpoint/recall workflow on a synthetic scenario.
+The loopback integration tests use real OMP processes, extension lifecycle and actual tools. One verifies automatic persistence/recall across two independent sessions. Another reproduces invalid aliases and catalogue-as-source failures, crosses the automatic threshold twice across process restart/resume, verifies native summary commits, continuation without user intervention, retained original entry IDs and full-history retrieval. Neither depends on a paid model's behavior. The optional live test separately measures whether a selected model follows the checkpoint/recall workflow on a synthetic scenario.
 
-Neither establishes long-run factual completeness, token savings on arbitrary projects, all possible provider quirks, or an operating system that has not run the tests. Notes-backed windows remain an experimental upstream feature. A graph or valid source ID never substitutes for inspecting the current source or obtaining real authorization for an external action.
+These tests do not establish long-run factual completeness, token savings on arbitrary projects, all possible provider quirks, or an operating system that has not run them. Native notes/full-history support remains experimental upstream. Provider failure, disabled maintenance, oversized fixed prompts or single indivisible tool units can still prevent compaction; the extension does not override the host's failure handling. A graph or valid source ID never substitutes for inspecting the current source or obtaining real authorization for an external action.

@@ -21,7 +21,7 @@ jobs:
       - name: Python unit tests
         run: python -m unittest discover -s tests -p "test_*.py"
       - name: JavaScript unit tests
-        run: node --test tests/checkpoint.test.mjs tests/notebook.test.mjs
+        run: node --test tests/checkpoint.test.mjs tests/notebook.test.mjs tests/compaction.test.mjs
       - name: Public source bundle check
         run: python scripts/package.py --check
       - name: Install on POSIX
@@ -36,3 +36,5 @@ jobs:
         env:
           KIT_TEST_PREFIX: ${{ runner.temp }}/omp-kit
         run: python tests/integration_rpc.py --prefix "${{ runner.temp }}/omp-kit"
+      - name: Native automatic compaction with failed checkpoints (loopback only)
+        run: python tests/integration_compaction.py --prefix "${{ runner.temp }}/omp-kit"

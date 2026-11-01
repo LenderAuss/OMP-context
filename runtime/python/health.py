@@ -20,8 +20,9 @@ def summarize(entries):
     totals = dict.fromkeys(FIELDS, 0)
     result = {"model_requests": 0, "usage_missing": 0, "provider_errors": 0, "by_model": {},
               "checkpoint_write_requests": 0, "checkpoint_saves": 0, "context_notes_errors": 0,
-              "recall_cards": 0, "recall_utf8_bytes": 0, "rollovers": 0, "latest_rollover": None}
-    pending_rollover = None
+              "recall_cards": 0, "recall_utf8_bytes": 0, "rollovers": 0, "latest_rollover": None,
+              "compactions": 0, "summary_compactions": 0, "latest_compaction": None}
+    pending_compaction = None
     for entry in entries:
         message = entry.get("message", {})
         if message.get("role") == "assistant":
@@ -35,9 +36,9 @@ def summarize(entries):
                 for key in FIELDS:
                     totals[key] += values[key]; model[key] += values[key]
                 result["latest_request"] = {"time": entry.get("timestamp"), **values}
-                if pending_rollover is not None:
-                    pending_rollover["next_request_input"] = values["input"] + values["cacheRead"] + values["cacheWrite"]
-                    pending_rollover = None
+                if pending_compaction is not None:
+                    pending_compaction["next_request_input"] = values["input"] + values["cacheRead"] + values["cacheWrite"]
+                    pending_compaction = None
             else:
                 result["usage_missing"] += 1
             result["provider_errors"] += message.get("stopReason") == "error"
@@ -53,14 +54,22 @@ def summarize(entries):
         if entry.get("customType") == "omp-context-kit.recall":
             result["recall_cards"] += 1
             result["recall_utf8_bytes"] += len(text_content(entry.get("content")).encode("utf-8"))
-        if entry.get("type") == "compaction" and entry.get("details", {}).get("kind") == "experimental-context-rollover":
-            result["rollovers"] += 1
-            result["latest_rollover"] = {"time": entry.get("timestamp"), "tokens_before": entry.get("tokensBefore")}
-            pending_rollover = result["latest_rollover"]
+        if entry.get("type") == "compaction":
+            rollover = (entry.get("details") or {}).get("kind") == "experimental-context-rollover"
+            result["compactions"] += 1
+            result["latest_compaction"] = {"time": entry.get("timestamp"), "tokens_before": entry.get("tokensBefore"),
+                                           "tokens_after_estimate": entry.get("tokensAfter"),
+                                           "method": "notebook-rollover" if rollover else entry.get("method", "summary")}
+            pending_compaction = result["latest_compaction"]
+            if rollover:
+                result["rollovers"] += 1
+                result["latest_rollover"] = pending_compaction
+            else:
+                result["summary_compactions"] += 1
     total_input = totals["input"] + totals["cacheRead"] + totals["cacheWrite"]
     result.update(reported_tokens=totals, reported_input_total=total_input,
                   cache_read_share_percent=round(100 * totals["cacheRead"] / total_input, 2) if total_input else None,
-                  limitations="Provider-reported usage, not a bill. Recall bytes are not tokens and do not measure repeated context processing. No causal savings estimate or dialogue text is included.")
+                  limitations="Usage from journaled assistant messages, not a bill. Native summarizer/side requests may not appear in these totals. Recall bytes are not tokens and do not measure repeated context processing. No causal savings estimate or dialogue text is included.")
     return result
 
 

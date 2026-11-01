@@ -70,34 +70,36 @@ test("source retrieval is bounded and includes real camelCase toolResult", () =>
 
 function mock() {
   const hooks = {}, tools = {}, commands = {}, messages = [], notifications = [];
+  let active = ["context_notes","new_context","read","grep"];
   const schema = new Proxy(() => schema, {get:() => schema,apply:() => schema});
-  const pi = { zod:schema, setLabel(){}, on:(name, fn) => {hooks[name]=fn;}, getActiveTools:() => ["context_notes","new_context","read","grep"],
+  const pi = { zod:schema, setLabel(){}, on:(name, fn) => {hooks[name]=fn;}, getActiveTools:() => active, setActiveTools:async names=>{active=names;},
     registerTool:t => tools[t.name]=t, registerCommand:(name,c) => commands[name]=c, sendMessage:(...x) => messages.push(x), sendUserMessage:(...x) => messages.push(x), exec:async()=>({code:0,stdout:"bounded answer",stderr:""}) };
   let branch = base;
   const ctx = {cwd:os.tmpdir(),getContextUsage:()=>({tokens:100,contextWindow:200000}),sessionManager:{getBranch:()=>branch,getSessionId:()=>"test"},hasUI:true,ui:{notify:(...x)=>notifications.push(x)}};
   extension(pi);
   return {pi,hooks,tools,commands,ctx,messages,notifications,setBranch:b=>branch=b};
 }
-test("policy adds one stable block without replacing host instructions", () => {
-  const m=mock(); const r=m.hooks.before_agent_start({reason:"prompt",systemPrompt:["existing"]});
-  assert.deepEqual(r.systemPrompt,["existing",POLICY]); assert.equal(m.hooks.before_agent_start({reason:"revive"}),undefined);
+test("policy adds one stable block without replacing host instructions", async () => {
+  const m=mock(); const r=await m.hooks.before_agent_start({reason:"prompt",systemPrompt:["existing"]});
+  assert.deepEqual(r.systemPrompt,["existing",POLICY]); assert.equal(await m.hooks.before_agent_start({reason:"revive"}),undefined);
 });
-test("compaction guard cancels without changing original transcript, one bounded repair", () => {
+test("missing checkpoint never blocks native summaries or schedules repair loops", async () => {
   const m=mock(), before=JSON.stringify(base); const event={branchEntries:base,preparation:{firstKeptEntryId:"u2"}};
-  assert.equal(m.hooks.session_before_compact(event,m.ctx).cancel,true); assert.equal(m.messages.length,1);
-  assert.equal(m.hooks.session_stop().continue,true); assert.equal(m.hooks.session_stop(),undefined);
-  m.hooks.session_before_compact(event,m.ctx); assert.equal(m.messages.length,1); assert.equal(m.hooks.session_stop(),undefined);
+  await m.hooks.before_agent_start({reason:"prompt",systemPrompt:[]});
+  for(let i=0;i<10;i++)assert.equal(await m.hooks.session_before_compact(event,m.ctx),undefined);
+  assert.equal(m.messages.length,0);assert.equal(m.hooks.session_stop,undefined);
   assert.equal(JSON.stringify(base),before);
 });
-test("valid checkpoint allows native compaction; invalid writes do not execute", () => {
+test("native summaries run while invalid writes remain rejected", async () => {
   const m=mock(); const entries=[...base,note()];m.setBranch(entries);
-  assert.equal(m.hooks.session_before_compact({branchEntries:entries,preparation:{}},m.ctx),undefined);
+  await m.hooks.before_agent_start({reason:"prompt",systemPrompt:[]});
+  assert.equal(await m.hooks.session_before_compact({branchEntries:entries,preparation:{}},m.ctx),undefined);
   assert.equal(m.hooks.tool_call({toolName:"context_notes",input:{text:""}},m.ctx).block,true);
   assert.equal(m.hooks.tool_call({toolName:"context_notes",input:{text:JSON.stringify(checkpoint())}},m.ctx),undefined);
 });
-test("disabled native mode leaves ordinary tools and compaction alone", () => {
+test("disabled native notes leave ordinary tools and compaction alone", async () => {
   const m=mock();m.pi.getActiveTools=()=>["read","grep"];
-  assert.equal(m.hooks.session_before_compact({branchEntries:base,preparation:{}},m.ctx),undefined);
+  assert.equal(await m.hooks.session_before_compact({branchEntries:base,preparation:{}},m.ctx),undefined);
   assert.equal(m.hooks.tool_call({toolName:"write",input:{}},m.ctx),undefined);
 });
 test("graph vocabulary, freshness warning and output budget", async t => {

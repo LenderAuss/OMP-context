@@ -39,6 +39,15 @@ class HealthTest(unittest.TestCase):
             self.assertEqual(value['malformed_or_incomplete_lines'],1)
             self.assertFalse(value['partial']);self.assertEqual(p.read_bytes(),before)
 
+    def test_native_summary_is_counted_even_with_no_successful_checkpoint(self):
+        entries=[{'type':'compaction','method':'soft','tokensBefore':130000,'tokensAfter':8000},self.entries()[-1]]
+        value=h.summarize(entries)
+        self.assertEqual(value['compactions'],1);self.assertEqual(value['summary_compactions'],1)
+        self.assertEqual(value['rollovers'],0);self.assertEqual(value['checkpoint_saves'],0)
+        self.assertEqual(value['latest_compaction']['next_request_input'],100)
+        self.assertEqual(value['latest_compaction']['method'],'soft')
+        self.assertIn('summarizer',value['limitations'])
+
     def test_missing_usage_and_non_session_files_are_explicit(self):
         self.assertEqual(h.summarize([{'message':{'role':'assistant'}}])['usage_missing'],1)
         self.assertIsNone(h.summarize([])['cache_read_share_percent'])

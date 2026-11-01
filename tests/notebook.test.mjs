@@ -25,11 +25,18 @@ test("legacy serialized notes remain supported and ambiguous input is rejected",
   assert.equal(compileCheckpoint({},entries,null,"s"),undefined);
   assert.throws(()=>compileCheckpoint({...input(),text:"also supplied"},entries,catalog,"session-one"));
 });
+test("in_progress is saved as unfinished and catalogue IDs cannot masquerade as citations",()=>{
+  const value=input();value.state.progress[0].status="in_progress";
+  assert.equal(JSON.parse(compileCheckpoint(value,entries,catalog,"session-one")).progress[0].status,"pending");
+  assert.equal(value.state.progress[0].status,"in_progress");
+  value.state.goal.sources=[catalog.id];
+  assert.throws(()=>compileCheckpoint(value,entries,catalog,"session-one"),/not a source/);
+});
 test("native notebook is the only writer and disabled notes mode is not replaced",async()=>{
   const hooks={},tools={};let nativeCalls=0;
   const schema=new Proxy(()=>schema,{get:()=>schema,apply:()=>schema});
   let enabled=false;
-  const pi={zod:schema,on:(name,fn)=>(hooks[name]??=[]).push(fn),registerTool:t=>tools[t.name]=t,getActiveTools:()=>enabled?["context_notes","new_context"]:[]};
+  const pi={zod:schema,on:(name,fn)=>(hooks[name]??=[]).push(fn),registerTool:t=>tools[t.name]=t,getActiveTools:()=>enabled?["context_notes"]:[]};
   const catalogFor=installNotebook(pi);
   for(const fn of hooks.session_start)fn();assert.equal(tools.context_notes,undefined);
   enabled=true;for(const fn of hooks.session_start)fn();

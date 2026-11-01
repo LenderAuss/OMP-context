@@ -9,6 +9,8 @@ collab:
   autoStart: "off"
 compaction:
   enabled: true
+  # Keep native notes and full-history retrieval. The extension excludes
+  # new_context so OMP uses its regular summary pipeline for compaction.
   experimentalContextManagement: true
   methodOrder: [shake, soft]
   asyncEnabled: false
@@ -16,7 +18,7 @@ compaction:
   thresholdTokens: 120000
   thresholdPercent: -1
   keepRecentTokens: 20000
-  autoContinue: false
+  autoContinue: true
   idleEnabled: false
   supersedeReads: false
   dropUseless: false
